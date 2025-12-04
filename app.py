@@ -21,12 +21,37 @@ except LookupError:
 
 # --- LISTA DE FRASES COMUNES DE IA (EN ESPAÑOL) ---
 AI_PHRASES = [
-    "es importante destacar", "en conclusión", "por otro lado", 
-    "cabe mencionar", "en resumen", "además", "sin embargo", 
-    "es crucial", "en el contexto de", "un papel fundamental",
-    "transformación digital", "amplia gama de", "meticulosamente",
-    "profundizar en", "ámbito", "fomentar", "integral",
-    "en última instancia", "dicho esto", "no obstante"
+    "En primer lugar", "En segundo término", "Por una parte... por otra", 
+    "A continuación", "Asimismo", "De igual manera", "Del mismo modo",
+    "En consecuencia", "Por lo tanto", "Así pues", "De ahí que",
+    "En otras palabras", "Es decir", "Esto significa que",
+    "A modo de ejemplo", "Para ilustrar esto", "Pongamos por caso",
+    "Resulta fundamental", "Es de vital importancia", "Conviene subrayar",
+    "Vale la pena recordar", "Cabe resaltar que", "Es relevante apuntar",
+    "Como punto de partida", "En términos generales", "Desde una perspectiva amplia",
+    "Históricamente", "Tradicionalmente", "En la actualidad",
+    "En comparación con", "A diferencia de", "Por el contrario",
+    "Si bien es cierto que", "A pesar de que", "Aun cuando",
+    "Esto plantea la cuestión de", "Surge entonces la pregunta",
+    "Desde un punto de vista crítico", "Analizando en profundidad",
+    "En definitiva", "A modo de síntesis", "En esencia",
+    "Para finalizar", "Como colofón", "En líneas generales",
+    "El principal hallazgo es", "La conclusión principal radica en",
+    "En última instancia", "A fin de cuentas",
+    "Eficiente", "Óptimo", "Preciso", "Robusto", "Escalable",
+    "Paradigma", "Marco conceptual", "Ecosistema",
+    "Leveraje", "Sinergia", "Potenciar",
+    "Interconectado", "Interdependiente", "Holístico",
+    "Estado del arte", "Algoritmo", "Modelo predictivo", "Conjunto de datos",
+    "Capacidad de generalización", "Procesamiento del lenguaje natural (PLN)",
+    "Por lo general", "En la mayoría de los casos", "Suele ocurrir que",
+    "Es probable que", "Podría considerarse", "Existe la posibilidad de",
+    "Según los datos disponibles", "Basándonos en la información proporcionada",
+    "Es recomendable", "Se sugiere", "Podría ser beneficioso",
+    "Para responder a tu pregunta", "Me preguntas sobre", "Entiendo que buscas",
+    "Voy a desglosarlo", "Permíteme explicarlo paso a paso",
+    "¿Te gustaría que profundice en algún punto en particular?",
+    "Es un tema complejo, pero intentaré simplificarlo"
 ]
 
 # --- FUNCIONES DE EXTRACCIÓN ---
