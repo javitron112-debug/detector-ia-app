@@ -4,22 +4,29 @@ from pypdf import PdfReader
 from docx import Document
 import nltk
 
-# Descargar tokenizador de oraciones si es la primera vez
+# --- CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Humanizador de Texto", layout="wide")
+
+# --- CORRECCIÓN DEL ERROR DE NLTK ---
+# Descargamos explícitamente ambos recursos necesarios para evitar el error "punkt_tab not found"
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
     nltk.download('punkt')
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Humanizador de Texto", layout="wide")
+try:
+    nltk.data.find('tokenizers/punkt_tab')
+except LookupError:
+    nltk.download('punkt_tab')
 
 # --- LISTA DE FRASES COMUNES DE IA (EN ESPAÑOL) ---
-# Los detectores buscan estas transiciones excesivamente formales y estructuradas.
 AI_PHRASES = [
     "es importante destacar", "en conclusión", "por otro lado", 
     "cabe mencionar", "en resumen", "además", "sin embargo", 
     "es crucial", "en el contexto de", "un papel fundamental",
-    "transformación digital", "amplia gama de", "meticulosamente"
+    "transformación digital", "amplia gama de", "meticulosamente",
+    "profundizar en", "ámbito", "fomentar", "integral",
+    "en última instancia", "dicho esto", "no obstante"
 ]
 
 # --- FUNCIONES DE EXTRACCIÓN ---
@@ -55,28 +62,31 @@ def analyze_and_highlight(text):
         pattern = re.compile(re.escape(phrase), re.IGNORECASE)
         # El <span> añade el fondo amarillo
         highlighted_text = pattern.sub(
-            f'<span style="background-color: #ffd700; color: black; font-weight: bold;" title="Frase común de IA">{phrase}</span>', 
+            f'<span style="background-color: #ffd700; color: black; font-weight: bold; padding: 2px; border-radius: 3px;" title="Frase común de IA">{phrase}</span>', 
             highlighted_text
         )
     
-    # 2. Análisis de Monotonía (Rafagosidad baja)
-    # Si una oración es muy larga y compleja, a veces es señal de IA.
-    sentences = nltk.tokenize.sent_tokenize(text)
-    
-    # Reconstruimos el texto procesando oraciones
-    # Nota: Este es un método simplificado de visualización. 
-    # Para producción, se debe reconstruir con cuidado para no romper el HTML anterior.
-    
+    # Contamos cuántas frases de IA se encontraron para las métricas
     count_ai_phrases = sum(1 for phrase in AI_PHRASES if phrase in text.lower())
     
-    return highlighted_text, count_ai_phrases
+    # Usamos sent_tokenize solo para verificar que NLTK funciona, 
+    # aunque en este MVP no estamos modificando la estructura de oraciones visualmente.
+    try:
+        sentences = nltk.tokenize.sent_tokenize(text)
+        num_sentences = len(sentences)
+    except Exception as e:
+        num_sentences = 0
+        print(f"Error en tokenización: {e}")
+    
+    return highlighted_text, count_ai_phrases, num_sentences
 
 # --- INTERFAZ DE USUARIO (STREAMLIT) ---
 
 st.title("🕵️ Detector y Humanizador de Textos")
 st.markdown("""
-Sube tu documento (.txt, .pdf, .docx). La aplicación resaltará:
-* <span style="background-color: #ffd700; color: black;">Amarillo</span>: Frases "muletilla" típicas de la IA.
+### ¿Cómo funciona?
+Sube tu documento y la herramienta resaltará patrones repetitivos.
+* <span style="background-color: #ffd700; color: black; padding: 2px; border-radius: 3px;">**Amarillo**</span>: Conectores y "muletillas" que delatan a ChatGPT/Claude.
 """, unsafe_allow_html=True)
 
 uploaded_file = st.sidebar.file_uploader("Sube tu archivo", type=["txt", "pdf", "docx"])
@@ -94,29 +104,48 @@ if uploaded_file is not None:
         elif file_type == "docx":
             raw_text = read_docx(uploaded_file)
         
-        st.success(f"Archivo '{uploaded_file.name}' procesado correctamente.")
+        st.success(f"Archivo **{uploaded_file.name}** cargado.")
         
         # Botón de análisis
-        if st.button("Analizar Texto"):
-            with st.spinner("Buscando patrones de IA..."):
-                html_result, count = analyze_and_highlight(raw_text)
-            
-            # Métricas rápidas
-            col1, col2 = st.columns(2)
-            col1.metric("Palabras Totales", len(raw_text.split()))
-            col2.metric("Frases de IA detectadas", count)
-            
-            st.markdown("### Resultado del Análisis")
-            st.info("Edita las partes resaltadas para aumentar la 'Rafagosidad' y naturalidad del texto.")
-            
-            # Caja con el texto resaltado
-            st.markdown(
-                f'<div style="padding: 20px; border: 1px solid #ddd; border-radius: 5px; background-color: #f9f9f9; color: #333; line-height: 1.6;">{html_result}</div>', 
-                unsafe_allow_html=True
-            )
+        if st.button("🔍 Analizar Texto"):
+            if not raw_text.strip():
+                st.warning("El documento parece estar vacío o no se pudo leer el texto.")
+            else:
+                with st.spinner("Escaneando patrones..."):
+                    html_result, count, num_sentences = analyze_and_highlight(raw_text)
+                
+                # Métricas
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Palabras Totales", len(raw_text.split()))
+                col2.metric("Oraciones", num_sentences)
+                col3.metric("Frases 'Robóticas'", count, delta_color="inverse")
+                
+                st.markdown("---")
+                st.subheader("📝 Resultado del Análisis")
+                st.info("Sugerencia: Reescribe las partes amarillas usando un lenguaje más coloquial o directo.")
+                
+                # Caja con el texto resaltado (Scrollable)
+                st.markdown(
+                    f"""
+                    <div style="
+                        padding: 20px; 
+                        border: 1px solid #ccc; 
+                        border-radius: 10px; 
+                        background-color: white; 
+                        color: #333; 
+                        line-height: 1.8; 
+                        height: 500px; 
+                        overflow-y: scroll;
+                        font-family: Arial, sans-serif;
+                    ">
+                        {html_result}
+                    </div>
+                    """, 
+                    unsafe_allow_html=True
+                )
 
     except Exception as e:
-        st.error(f"Error al leer el archivo: {e}")
+        st.error(f"Ocurrió un error al procesar el archivo: {e}")
 
 else:
-    st.info("Por favor, sube un archivo desde el menú lateral para comenzar.")
+    st.info("👈 Sube un archivo TXT, PDF o DOCX desde el menú lateral.")
