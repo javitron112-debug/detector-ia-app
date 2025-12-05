@@ -2,4 +2,4 @@ streamlit
 PyMuPDF
 transformers
 torch
-nltk # Para la división de frases
+nltk
