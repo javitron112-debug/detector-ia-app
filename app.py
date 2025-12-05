@@ -7,16 +7,19 @@ import nltk
 from nltk.tokenize import sent_tokenize
 
 # --- 0. Configuración Inicial y Descarga de NLTK (Corregida) ---
-# Solo se descarga el recurso 'punkt'. Esto es suficiente cuando no se especifica el idioma.
+# Descargamos los dos recursos necesarios para el tokenizador de sentencias.
 try:
+    # Recurso genérico
     nltk.download('punkt', quiet=True)
+    # Recurso específico que contiene las tablas de tokenización (CORRECCIÓN)
+    nltk.download('punkt_tab', quiet=True) 
 except Exception as e:
-    st.error(f"Error al inicializar NLTK (punkt): {e}. Por favor, verifica tu conexión a internet o permisos.")
+    st.error(f"Error al inicializar NLTK: {e}. Por favor, verifica tu conexión a internet o permisos.")
 
 # --- 1. Configuración y Carga de Modelo ---
 # Modelo de lenguaje causal en español (GPT-2 Small)
 MODEL_NAME = "datificate/gpt2-small-spanish"
-# Umbral de Perplejidad: ajusta este valor. Un valor bajo (ej. 50) indica texto predecible (IA).
+# Umbral de Perplejidad: ajusta este valor (ej. 50). La baja perplejidad indica texto predecible (IA).
 PERPLEXITY_THRESHOLD = 50 
 
 @st.cache_resource
@@ -28,11 +31,9 @@ def load_model():
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
         
-        # Asegurarse de que el tokenizador tenga un token de pad
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
             
-        # Determinar el dispositivo (CPU en Streamlit Cloud)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model.to(device)
             
@@ -59,7 +60,6 @@ def calculate_perplexity(text):
     
     # Perplejidad = exponente de la pérdida (loss)
     with torch.no_grad():
-        # Usamos labels=input_ids para calcular la pérdida del token siguiente
         loss = model(**encodings, labels=encodings.input_ids).loss
     
     # Calcula la perplejidad (e^loss)
@@ -69,7 +69,7 @@ def calculate_perplexity(text):
 def analyze_text_for_ai(text):
     """Divide el texto en frases, las clasifica por perplejidad y calcula el porcentaje total."""
     
-    # 1. División en frases (CORRECCIÓN APLICADA: Sin especificar language='spanish')
+    # 1. División en frases (Usando el tokenizador genérico 'punkt' que ahora tiene 'punkt_tab')
     sentences = sent_tokenize(text)
     
     results = []
