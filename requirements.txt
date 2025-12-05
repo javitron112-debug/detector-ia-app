@@ -3,3 +3,7 @@ PyMuPDF
 transformers
 torch
 nltk
+numpy
+pandas
+matplotlib
+seaborn

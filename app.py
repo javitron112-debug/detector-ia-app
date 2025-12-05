@@ -5,8 +5,9 @@ import torch
 import numpy as np
 import nltk
 from nltk.tokenize import sent_tokenize
-import plotly.graph_objects as go
-from collections import defaultdict
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # --- 0. Configuración Inicial ---
 try:
@@ -113,51 +114,40 @@ def analyze_text_for_ai(text, threshold=PERPLEXITY_THRESHOLD):
     ai_percentage = (ai_sentence_count / total_sentences) * 100
     
     # Estadísticas adicionales
+    valid_perplexities = [p for p in perplexities if p != np.inf]
+    
     stats = {
         "total_sentences": total_sentences,
         "ai_sentences": ai_sentence_count,
         "human_sentences": total_sentences - ai_sentence_count,
-        "avg_perplexity": np.mean(perplexities) if perplexities else 0,
-        "median_perplexity": np.median(perplexities) if perplexities else 0,
-        "min_perplexity": np.min(perplexities) if perplexities else 0,
-        "max_perplexity": np.max(perplexities) if perplexities else 0,
+        "avg_perplexity": np.mean(valid_perplexities) if valid_perplexities else 0,
+        "median_perplexity": np.median(valid_perplexities) if valid_perplexities else 0,
+        "min_perplexity": np.min(valid_perplexities) if valid_perplexities else 0,
+        "max_perplexity": np.max(valid_perplexities) if valid_perplexities else 0,
     }
     
     return results, ai_percentage, stats
 
 def create_perplexity_chart(results, threshold):
-    """Crea gráfico de distribución de perplejidad."""
+    """Crea gráfico de distribución de perplejidad usando matplotlib."""
     perplexities = [r['perplexity'] for r in results if r['perplexity'] != np.inf]
     
     if not perplexities:
         return None
     
-    fig = go.Figure()
+    fig, ax = plt.subplots(figsize=(10, 5))
     
     # Histograma
-    fig.add_trace(go.Histogram(
-        x=perplexities,
-        nbinsx=30,
-        name='Distribución',
-        marker_color='rgb(99, 110, 250)'
-    ))
+    ax.hist(perplexities, bins=30, color='#636EFA', alpha=0.7, edgecolor='black')
     
     # Línea de umbral
-    fig.add_vline(
-        x=threshold, 
-        line_dash="dash", 
-        line_color="red",
-        annotation_text=f"Umbral: {threshold}",
-        annotation_position="top"
-    )
+    ax.axvline(x=threshold, color='red', linestyle='--', linewidth=2, label=f'Umbral: {threshold}')
     
-    fig.update_layout(
-        title="Distribución de Perplejidad por Frase",
-        xaxis_title="Perplejidad",
-        yaxis_title="Frecuencia",
-        showlegend=False,
-        height=400
-    )
+    ax.set_xlabel('Perplejidad', fontsize=12)
+    ax.set_ylabel('Frecuencia', fontsize=12)
+    ax.set_title('Distribución de Perplejidad por Frase', fontsize=14, fontweight='bold')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
     
     return fig
 
@@ -254,8 +244,7 @@ if uploaded_file is not None:
                     
                     metric_cols[0].metric(
                         "Probabilidad IA",
-                        f"{ai_percentage:.1f}%",
-                        delta=None
+                        f"{ai_percentage:.1f}%"
                     )
                     
                     metric_cols[1].metric(
@@ -305,7 +294,9 @@ if uploaded_file is not None:
                         
                         chart = create_perplexity_chart(analysis_results, custom_threshold)
                         if chart:
-                            st.plotly_chart(chart, use_container_width=True)
+                            st.pyplot(chart)
+                        
+                        st.divider()
                         
                         # Estadísticas adicionales
                         col1, col2 = st.columns(2)
@@ -321,16 +312,46 @@ if uploaded_file is not None:
                             st.write(f"- **Frases posible IA:** {stats['ai_sentences']}")
                             st.write(f"- **Frases posible humano:** {stats['human_sentences']}")
                             st.write(f"- **Porcentaje IA:** {ai_percentage:.2f}%")
+                        
+                        # Tabla de resumen
+                        st.subheader("📋 Resumen en Tabla")
+                        df = pd.DataFrame({
+                            'Métrica': ['Total frases', 'Frases IA', 'Frases Humano', 'Perplejidad Media', 'Perplejidad Mediana'],
+                            'Valor': [
+                                stats['total_sentences'],
+                                stats['ai_sentences'],
+                                stats['human_sentences'],
+                                f"{stats['avg_perplexity']:.2f}",
+                                f"{stats['median_perplexity']:.2f}"
+                            ]
+                        })
+                        st.dataframe(df, use_container_width=True, hide_index=True)
                     
                     with tab3:
                         st.subheader("Detalle por Frase")
                         
-                        for idx, item in enumerate(analysis_results, 1):
+                        # Filtros
+                        filter_col1, filter_col2 = st.columns(2)
+                        with filter_col1:
+                            show_filter = st.selectbox(
+                                "Mostrar:",
+                                ["Todas", "Solo IA", "Solo Humano"]
+                            )
+                        
+                        filtered_results = analysis_results
+                        if show_filter == "Solo IA":
+                            filtered_results = [r for r in analysis_results if r['is_ai']]
+                        elif show_filter == "Solo Humano":
+                            filtered_results = [r for r in analysis_results if not r['is_ai']]
+                        
+                        for idx, item in enumerate(filtered_results, 1):
+                            tipo = '🤖 IA' if item['is_ai'] else '👤 Humano'
                             with st.expander(
-                                f"Frase {idx} - {'🤖 IA' if item['is_ai'] else '👤 Humano'} (Perplejidad: {item['perplexity']:.2f})"
+                                f"Frase {idx} - {tipo} (Perplejidad: {item['perplexity']:.2f})",
+                                expanded=False
                             ):
                                 st.write(item['sentence'])
-                                st.caption(f"Palabras: {item['word_count']}")
+                                st.caption(f"📝 Palabras: {item['word_count']}")
             else:
                 st.error("❌ No se pudo extraer texto del PDF.")
 else:
