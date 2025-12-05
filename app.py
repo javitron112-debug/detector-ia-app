@@ -1,123 +1,221 @@
 import streamlit as st
-import fitz # PyMuPDF
+import fitz  # PyMuPDF
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 import numpy as np
 import nltk
 from nltk.tokenize import sent_tokenize
+import plotly.graph_objects as go
+from collections import defaultdict
 
-# --- 0. Configuración Inicial y Descarga de NLTK (Corregida) ---
-# Descargamos los dos recursos necesarios para el tokenizador de sentencias.
+# --- 0. Configuración Inicial ---
 try:
-    # Recurso genérico
     nltk.download('punkt', quiet=True)
-    # Recurso específico que contiene las tablas de tokenización (CORRECCIÓN)
-    nltk.download('punkt_tab', quiet=True) 
+    nltk.download('punkt_tab', quiet=True)
 except Exception as e:
-    st.error(f"Error al inicializar NLTK: {e}. Por favor, verifica tu conexión a internet o permisos.")
+    st.error(f"Error al inicializar NLTK: {e}")
 
-# --- 1. Configuración y Carga de Modelo ---
-# Modelo de lenguaje causal en español (GPT-2 Small)
+# --- 1. Configuración de Modelo ---
 MODEL_NAME = "datificate/gpt2-small-spanish"
-# Umbral de Perplejidad: ajusta este valor (ej. 50). La baja perplejidad indica texto predecible (IA).
-PERPLEXITY_THRESHOLD = 50 
+PERPLEXITY_THRESHOLD = 50
 
 @st.cache_resource
 def load_model():
-    """Carga el modelo y el tokenizador una sola vez."""
+    """Carga el modelo y tokenizador."""
     try:
-        st.info(f"Cargando modelo de IA: {MODEL_NAME}... Esto puede tardar unos segundos.")
-        
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
-        
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+        with st.spinner(f"Cargando modelo {MODEL_NAME}..."):
+            tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+            model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
             
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model.to(device)
-            
-        return tokenizer, model, device
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+                
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model.to(device)
+            model.eval()  # Modo evaluación
+                
+            return tokenizer, model, device
     except Exception as e:
-        st.error(f"Error crítico al cargar el modelo de IA. Verifique el nombre o los recursos de memoria: {e}")
+        st.error(f"Error al cargar el modelo: {e}")
         return None, None, None
 
 tokenizer, model, device = load_model()
 
-# --- 2. Función de Detección de Perplejidad ---
+# --- 2. Funciones de Análisis Mejoradas ---
 
-def calculate_perplexity(text):
-    """Calcula la perplejidad del texto usando el modelo CLM."""
-    if not model or not tokenizer:
+def calculate_perplexity(text, max_length=512):
+    """Calcula perplejidad con manejo mejorado de texto largo."""
+    if not model or not tokenizer or not text.strip():
         return np.inf
 
     input_text = text.strip().replace('\n', ' ')
-    if not input_text:
+    
+    try:
+        encodings = tokenizer(
+            input_text, 
+            return_tensors='pt', 
+            truncation=True, 
+            max_length=max_length,
+            padding=True
+        ).to(device)
+        
+        with torch.no_grad():
+            outputs = model(**encodings, labels=encodings.input_ids)
+            loss = outputs.loss
+        
+        perplexity = torch.exp(loss).item()
+        return perplexity
+    except Exception as e:
+        st.warning(f"Error calculando perplejidad: {e}")
         return np.inf
 
-    # Codificación del texto y mover a la CPU/GPU
-    encodings = tokenizer(input_text, return_tensors='pt', truncation=True, padding=True).to(device)
-    
-    # Perplejidad = exponente de la pérdida (loss)
-    with torch.no_grad():
-        loss = model(**encodings, labels=encodings.input_ids).loss
-    
-    # Calcula la perplejidad (e^loss)
-    perplexity = torch.exp(loss).item()
-    return perplexity
-
-def analyze_text_for_ai(text):
-    """Divide el texto en frases, las clasifica por perplejidad y calcula el porcentaje total."""
-    
-    # 1. División en frases (Usando el tokenizador genérico 'punkt' que ahora tiene 'punkt_tab')
+def analyze_text_for_ai(text, threshold=PERPLEXITY_THRESHOLD):
+    """Analiza texto con estadísticas detalladas."""
     sentences = sent_tokenize(text)
     
     results = []
     ai_sentence_count = 0
+    perplexities = []
 
-    # 2. Análisis por frase
-    for sentence in sentences:
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for idx, sentence in enumerate(sentences):
         if not sentence.strip():
             continue
         
-        ppl = calculate_perplexity(sentence)
+        # Actualizar progreso
+        progress = (idx + 1) / len(sentences)
+        progress_bar.progress(progress)
+        status_text.text(f"Analizando frase {idx + 1} de {len(sentences)}...")
         
-        # Clasificación
-        is_ai = ppl < PERPLEXITY_THRESHOLD
+        ppl = calculate_perplexity(sentence)
+        perplexities.append(ppl)
+        
+        is_ai = ppl < threshold
         if is_ai:
             ai_sentence_count += 1
         
         results.append({
             "sentence": sentence,
             "perplexity": ppl,
-            "is_ai": is_ai
+            "is_ai": is_ai,
+            "word_count": len(sentence.split())
         })
-        
+    
+    progress_bar.empty()
+    status_text.empty()
+    
     total_sentences = len(results)
     if total_sentences == 0:
-        return results, 0
-        
+        return results, 0, {}
+    
     ai_percentage = (ai_sentence_count / total_sentences) * 100
-    return results, ai_percentage
+    
+    # Estadísticas adicionales
+    stats = {
+        "total_sentences": total_sentences,
+        "ai_sentences": ai_sentence_count,
+        "human_sentences": total_sentences - ai_sentence_count,
+        "avg_perplexity": np.mean(perplexities) if perplexities else 0,
+        "median_perplexity": np.median(perplexities) if perplexities else 0,
+        "min_perplexity": np.min(perplexities) if perplexities else 0,
+        "max_perplexity": np.max(perplexities) if perplexities else 0,
+    }
+    
+    return results, ai_percentage, stats
 
-# --- 3. Interfaz de Streamlit ---
+def create_perplexity_chart(results, threshold):
+    """Crea gráfico de distribución de perplejidad."""
+    perplexities = [r['perplexity'] for r in results if r['perplexity'] != np.inf]
+    
+    if not perplexities:
+        return None
+    
+    fig = go.Figure()
+    
+    # Histograma
+    fig.add_trace(go.Histogram(
+        x=perplexities,
+        nbinsx=30,
+        name='Distribución',
+        marker_color='rgb(99, 110, 250)'
+    ))
+    
+    # Línea de umbral
+    fig.add_vline(
+        x=threshold, 
+        line_dash="dash", 
+        line_color="red",
+        annotation_text=f"Umbral: {threshold}",
+        annotation_position="top"
+    )
+    
+    fig.update_layout(
+        title="Distribución de Perplejidad por Frase",
+        xaxis_title="Perplejidad",
+        yaxis_title="Frecuencia",
+        showlegend=False,
+        height=400
+    )
+    
+    return fig
+
+# --- 3. Interfaz Mejorada ---
 
 st.set_page_config(
-    page_title="Detector de Texto IA en PDF (Español)",
-    layout="centered"
+    page_title="Detector de Texto IA en PDF",
+    page_icon="🤖",
+    layout="wide"
 )
 
-st.title("🤖 Detector de Texto IA en PDF (Español)")
-st.markdown("Sube un documento PDF para estimar la **probabilidad** de que haya sido generado por **Inteligencia Artificial** y **resaltar** las secciones sospechosas.")
+# Sidebar con configuración
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    
+    custom_threshold = st.slider(
+        "Umbral de Perplejidad",
+        min_value=10,
+        max_value=200,
+        value=PERPLEXITY_THRESHOLD,
+        step=5,
+        help="Valores más bajos = más estricto en la detección de IA"
+    )
+    
+    st.divider()
+    
+    st.markdown("""
+    ### ℹ️ Cómo funciona
+    
+    Este detector usa un modelo de lenguaje para calcular la **perplejidad** de cada frase:
+    
+    - **Baja perplejidad** (<50): Texto predecible, posiblemente generado por IA
+    - **Alta perplejidad** (>50): Texto más natural y variado
+    
+    ⚠️ **Nota**: Esta es una estimación probabilística, no una certeza absoluta.
+    """)
+    
+    if device:
+        st.info(f"🖥️ Dispositivo: {device.type.upper()}")
 
-uploaded_file = st.file_uploader("Sube tu archivo PDF aquí", type=["pdf"])
+# Header principal
+st.title("🤖 Detector de Texto IA en PDF")
+st.markdown("""
+Analiza documentos PDF para identificar secciones que podrían haber sido generadas por Inteligencia Artificial.
+""")
+
+uploaded_file = st.file_uploader(
+    "📄 Sube tu archivo PDF",
+    type=["pdf"],
+    help="El archivo será analizado localmente"
+)
 
 if uploaded_file is not None:
-    st.markdown(f"**Archivo subido:** `{uploaded_file.name}`")
+    st.success(f"✅ Archivo cargado: **{uploaded_file.name}**")
     
     @st.cache_data
     def extract_text_from_pdf(file):
-        """Extrae texto de un PDF usando PyMuPDF (fitz)."""
+        """Extrae texto del PDF."""
         try:
             doc = fitz.open(stream=file.read(), filetype="pdf")
             text = ""
@@ -128,50 +226,112 @@ if uploaded_file is not None:
             st.error(f"Error al leer el PDF: {e}")
             return None
 
-    if st.button("Analizar Documento", type="primary"):
+    col1, col2 = st.columns([1, 4])
+    
+    with col1:
+        analyze_button = st.button("🔍 Analizar", type="primary", use_container_width=True)
+    
+    if analyze_button:
         if model is None or tokenizer is None:
-             st.error("El modelo de IA no se cargó correctamente. Revisa los logs de Streamlit Cloud.")
+            st.error("❌ El modelo no se cargó correctamente.")
         else:
-            with st.spinner("Extrayendo texto y analizando contenido..."):
-                extracted_text = extract_text_from_pdf(uploaded_file)
+            extracted_text = extract_text_from_pdf(uploaded_file)
 
-                if extracted_text:
-                    if len(extracted_text.strip()) < 50:
-                        st.warning("El texto extraído es demasiado corto para un análisis confiable (mínimo 50 caracteres).")
-                    else:
-                        analysis_results, ai_percentage = analyze_text_for_ai(extracted_text)
-                        
-                        # --- Resultados ---
-                        st.header("Resultados del Análisis")
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        col1.metric(
-                            label="Probabilidad de Texto Generado por IA", 
-                            value=f"{ai_percentage:.2f}%"
-                        )
-                        
-                        col2.info(f"Umbral de Perplejidad: **<{PERPLEXITY_THRESHOLD}**. La baja perplejidad indica texto predecible.")
-                        
-                        st.divider()
-
-                        # Texto Resaltado
-                        st.subheader("Texto Analizado y Detecciones")
+            if extracted_text:
+                if len(extracted_text.strip()) < 50:
+                    st.warning("⚠️ El texto extraído es demasiado corto (mínimo 50 caracteres).")
+                else:
+                    analysis_results, ai_percentage, stats = analyze_text_for_ai(
+                        extracted_text, 
+                        threshold=custom_threshold
+                    )
+                    
+                    # --- Resultados ---
+                    st.header("📊 Resultados del Análisis")
+                    
+                    # Métricas principales
+                    metric_cols = st.columns(4)
+                    
+                    metric_cols[0].metric(
+                        "Probabilidad IA",
+                        f"{ai_percentage:.1f}%",
+                        delta=None
+                    )
+                    
+                    metric_cols[1].metric(
+                        "Total Frases",
+                        stats['total_sentences']
+                    )
+                    
+                    metric_cols[2].metric(
+                        "Frases IA",
+                        stats['ai_sentences']
+                    )
+                    
+                    metric_cols[3].metric(
+                        "Perplejidad Media",
+                        f"{stats['avg_perplexity']:.1f}"
+                    )
+                    
+                    st.divider()
+                    
+                    # Tabs para diferentes vistas
+                    tab1, tab2, tab3 = st.tabs(["📝 Texto Resaltado", "📈 Estadísticas", "📋 Detalle por Frase"])
+                    
+                    with tab1:
+                        st.subheader("Texto Analizado")
+                        st.caption("🟨 Amarillo = Posible IA | ⬜ Blanco = Posible Humano")
                         
                         highlighted_text = []
                         for item in analysis_results:
                             sentence = item['sentence'].replace('\n', ' ')
+                            ppl = item['perplexity']
                             
                             if item['is_ai']:
-                                # Resaltado en amarillo claro
-                                highlighted_text.append(f"<mark style='background-color:#fff3cd;'>{sentence}</mark>")
+                                tooltip = f"Perplejidad: {ppl:.2f}"
+                                highlighted_text.append(
+                                    f"<mark style='background-color:#fff3cd;' title='{tooltip}'>{sentence}</mark> "
+                                )
                             else:
-                                highlighted_text.append(sentence)
+                                highlighted_text.append(f"{sentence} ")
                         
                         st.markdown(
-                            "".join(highlighted_text), 
+                            "".join(highlighted_text),
                             unsafe_allow_html=True
                         )
-                
-                else:
-                    st.error("No se pudo extraer texto del documento PDF.")
+                    
+                    with tab2:
+                        st.subheader("Distribución de Perplejidad")
+                        
+                        chart = create_perplexity_chart(analysis_results, custom_threshold)
+                        if chart:
+                            st.plotly_chart(chart, use_container_width=True)
+                        
+                        # Estadísticas adicionales
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("### 📊 Estadísticas Generales")
+                            st.write(f"- **Perplejidad mínima:** {stats['min_perplexity']:.2f}")
+                            st.write(f"- **Perplejidad máxima:** {stats['max_perplexity']:.2f}")
+                            st.write(f"- **Perplejidad mediana:** {stats['median_perplexity']:.2f}")
+                        
+                        with col2:
+                            st.markdown("### 🎯 Clasificación")
+                            st.write(f"- **Frases posible IA:** {stats['ai_sentences']}")
+                            st.write(f"- **Frases posible humano:** {stats['human_sentences']}")
+                            st.write(f"- **Porcentaje IA:** {ai_percentage:.2f}%")
+                    
+                    with tab3:
+                        st.subheader("Detalle por Frase")
+                        
+                        for idx, item in enumerate(analysis_results, 1):
+                            with st.expander(
+                                f"Frase {idx} - {'🤖 IA' if item['is_ai'] else '👤 Humano'} (Perplejidad: {item['perplexity']:.2f})"
+                            ):
+                                st.write(item['sentence'])
+                                st.caption(f"Palabras: {item['word_count']}")
+            else:
+                st.error("❌ No se pudo extraer texto del PDF.")
+else:
+    st.info("👆 Sube un archivo PDF para comenzar el análisis.")
