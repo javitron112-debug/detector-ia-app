@@ -6,13 +6,14 @@ import numpy as np
 import nltk
 from nltk.tokenize import sent_tokenize
 
-# --- 0. Configuración Inicial y Descarga de NLTK ---
-# Descarga directamente el recurso necesario 'punkt' de NLTK.
-# Esta es la corrección que asegura la funcionalidad en Streamlit Cloud.
+# --- 0. Configuración Inicial y Descarga de NLTK (¡CORRECCIÓN!) ---
+# Se descargan los recursos necesarios para NLTK:
+# 'punkt' (recurso general) y 'spanish' (tokenizador específico del idioma).
 try:
     nltk.download('punkt', quiet=True)
+    nltk.download('spanish', quiet=True) 
 except Exception as e:
-    st.error(f"Error al inicializar NLTK (punkt): {e}")
+    st.error(f"Error al inicializar NLTK (punkt): {e}. Por favor, verifica tu conexión a internet o permisos.")
 
 # --- 1. Configuración y Carga de Modelo ---
 # Modelo de lenguaje causal en español (GPT-2 Small)
@@ -26,7 +27,6 @@ def load_model():
     try:
         st.info(f"Cargando modelo de IA: {MODEL_NAME}... Esto puede tardar unos segundos.")
         
-        # Usamos try-except para manejar fallos de carga grandes
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         model = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
         
@@ -34,12 +34,17 @@ def load_model():
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
             
-        return tokenizer, model
+        # Mueve el modelo a la GPU si está disponible para acelerar, si no, usa la CPU.
+        # Streamlit Cloud generalmente usa CPU, pero es buena práctica.
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.to(device)
+            
+        return tokenizer, model, device
     except Exception as e:
         st.error(f"Error crítico al cargar el modelo de IA. Verifique el nombre o los recursos de memoria: {e}")
-        return None, None
+        return None, None, None
 
-tokenizer, model = load_model()
+tokenizer, model, device = load_model()
 
 # --- 2. Función de Detección de Perplejidad ---
 
@@ -48,13 +53,12 @@ def calculate_perplexity(text):
     if not model or not tokenizer:
         return np.inf
 
-    # Limpiar y preparar el texto para el modelo
     input_text = text.strip().replace('\n', ' ')
     if not input_text:
         return np.inf
 
-    # Codificación del texto
-    encodings = tokenizer(input_text, return_tensors='pt', truncation=True, padding=True)
+    # Codificación del texto y mover a la CPU/GPU
+    encodings = tokenizer(input_text, return_tensors='pt', truncation=True, padding=True).to(device)
     
     # Perplejidad = exponente de la pérdida (loss)
     with torch.no_grad():
@@ -68,8 +72,8 @@ def calculate_perplexity(text):
 def analyze_text_for_ai(text):
     """Divide el texto en frases, las clasifica por perplejidad y calcula el porcentaje total."""
     
-    # 1. División en frases
-    # Usamos sent_tokenize de NLTK (ya descargado)
+    # 1. División en frases (¡CORRECCIÓN APLICADA!)
+    # El recurso 'spanish' ahora está garantizado por la descarga en el inicio.
     sentences = sent_tokenize(text, language='spanish')
     
     results = []
@@ -80,10 +84,9 @@ def analyze_text_for_ai(text):
         if not sentence.strip():
             continue
         
-        # Calcular la perplejidad de la frase
         ppl = calculate_perplexity(sentence)
         
-        # Clasificación: Si la perplejidad es baja, es más probable que sea IA.
+        # Clasificación
         is_ai = ppl < PERPLEXITY_THRESHOLD
         if is_ai:
             ai_sentence_count += 1
@@ -114,15 +117,12 @@ st.markdown("Sube un documento PDF para estimar la **probabilidad** de que haya 
 uploaded_file = st.file_uploader("Sube tu archivo PDF aquí", type=["pdf"])
 
 if uploaded_file is not None:
-    # Mostrar el nombre del archivo
     st.markdown(f"**Archivo subido:** `{uploaded_file.name}`")
     
-    # Extraer texto del PDF
     @st.cache_data
     def extract_text_from_pdf(file):
         """Extrae texto de un PDF usando PyMuPDF (fitz)."""
         try:
-            # fitz necesita que el archivo se lea como bytes
             doc = fitz.open(stream=file.read(), filetype="pdf")
             text = ""
             for page in doc:
@@ -132,53 +132,50 @@ if uploaded_file is not None:
             st.error(f"Error al leer el PDF: {e}")
             return None
 
-    # Botón de análisis
     if st.button("Analizar Documento", type="primary"):
-        with st.spinner("Extrayendo texto y analizando contenido..."):
-            extracted_text = extract_text_from_pdf(uploaded_file)
+        if model is None or tokenizer is None:
+             st.error("El modelo de IA no se cargó correctamente. Revisa los logs de Streamlit Cloud.")
+        else:
+            with st.spinner("Extrayendo texto y analizando contenido..."):
+                extracted_text = extract_text_from_pdf(uploaded_file)
 
-            if extracted_text:
-                if len(extracted_text.strip()) < 50:
-                    st.warning("El texto extraído es demasiado corto para un análisis confiable (mínimo 50 caracteres).")
-                else:
-                    analysis_results, ai_percentage = analyze_text_for_ai(extracted_text)
-                    
-                    # --- Resultados ---
-                    st.header("Resultados del Análisis")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    # Columna 1: Porcentaje
-                    col1.metric(
-                        label="Probabilidad de Texto Generado por IA", 
-                        value=f"{ai_percentage:.2f}%"
-                    )
-                    
-                    # Columna 2: Umbral (Explicación)
-                    col2.info(f"Umbral de Perplejidad: **<{PERPLEXITY_THRESHOLD}**. La baja perplejidad indica texto predecible.")
-                    
-                    st.divider()
-
-                    # Texto Resaltado
-                    st.subheader("Texto Analizado y Detecciones")
-                    
-                    # Construir el texto resaltado usando HTML/Markdown
-                    highlighted_text = []
-                    for item in analysis_results:
-                        # Limpiar saltos de línea para que la frase se muestre continua
-                        sentence = item['sentence'].replace('\n', ' ')
+                if extracted_text:
+                    if len(extracted_text.strip()) < 50:
+                        st.warning("El texto extraído es demasiado corto para un análisis confiable (mínimo 50 caracteres).")
+                    else:
+                        analysis_results, ai_percentage = analyze_text_for_ai(extracted_text)
                         
-                        if item['is_ai']:
-                            # Usar HTML para resaltar con un fondo amarillo claro
-                            highlighted_text.append(f"<mark style='background-color:#fff3cd;'>{sentence}</mark>")
-                        else:
-                            highlighted_text.append(sentence)
-                    
-                    # Unir y mostrar con HTML permitido (unsafe_allow_html=True)
-                    st.markdown(
-                        "".join(highlighted_text), 
-                        unsafe_allow_html=True
-                    )
-            
-            else:
-                st.error("No se pudo extraer texto del documento PDF.")
+                        # --- Resultados ---
+                        st.header("Resultados del Análisis")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        col1.metric(
+                            label="Probabilidad de Texto Generado por IA", 
+                            value=f"{ai_percentage:.2f}%"
+                        )
+                        
+                        col2.info(f"Umbral de Perplejidad: **<{PERPLEXITY_THRESHOLD}**. La baja perplejidad indica texto predecible.")
+                        
+                        st.divider()
+
+                        # Texto Resaltado
+                        st.subheader("Texto Analizado y Detecciones")
+                        
+                        highlighted_text = []
+                        for item in analysis_results:
+                            sentence = item['sentence'].replace('\n', ' ')
+                            
+                            if item['is_ai']:
+                                # Resaltado en amarillo claro
+                                highlighted_text.append(f"<mark style='background-color:#fff3cd;'>{sentence}</mark>")
+                            else:
+                                highlighted_text.append(sentence)
+                        
+                        st.markdown(
+                            "".join(highlighted_text), 
+                            unsafe_allow_html=True
+                        )
+                
+                else:
+                    st.error("No se pudo extraer texto del documento PDF.")
