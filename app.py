@@ -6,12 +6,10 @@ import numpy as np
 import nltk
 from nltk.tokenize import sent_tokenize
 
-# --- 0. Configuración Inicial y Descarga de NLTK (¡CORRECCIÓN!) ---
-# Se descargan los recursos necesarios para NLTK:
-# 'punkt' (recurso general) y 'spanish' (tokenizador específico del idioma).
+# --- 0. Configuración Inicial y Descarga de NLTK (Corregida) ---
+# Solo se descarga el recurso 'punkt'. Esto es suficiente cuando no se especifica el idioma.
 try:
     nltk.download('punkt', quiet=True)
-    nltk.download('spanish', quiet=True) 
 except Exception as e:
     st.error(f"Error al inicializar NLTK (punkt): {e}. Por favor, verifica tu conexión a internet o permisos.")
 
@@ -34,8 +32,7 @@ def load_model():
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
             
-        # Mueve el modelo a la GPU si está disponible para acelerar, si no, usa la CPU.
-        # Streamlit Cloud generalmente usa CPU, pero es buena práctica.
+        # Determinar el dispositivo (CPU en Streamlit Cloud)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model.to(device)
             
@@ -72,9 +69,8 @@ def calculate_perplexity(text):
 def analyze_text_for_ai(text):
     """Divide el texto en frases, las clasifica por perplejidad y calcula el porcentaje total."""
     
-    # 1. División en frases (¡CORRECCIÓN APLICADA!)
-    # El recurso 'spanish' ahora está garantizado por la descarga en el inicio.
-    sentences = sent_tokenize(text, language='spanish')
+    # 1. División en frases (CORRECCIÓN APLICADA: Sin especificar language='spanish')
+    sentences = sent_tokenize(text)
     
     results = []
     ai_sentence_count = 0
