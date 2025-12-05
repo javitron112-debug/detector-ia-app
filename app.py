@@ -40,7 +40,7 @@ def extract_text_from_pdf(pdf_file):
         st.error(f"Error extrayendo texto del PDF: {e}")
         return None
 
-def split_text_into_chunks(text, chunk_size=500):
+def split_text_into_chunks(text, chunk_size=400):
     """Divide el texto en fragmentos para análisis"""
     # Dividir por párrafos primero
     paragraphs = text.split('\n\n')
@@ -66,9 +66,10 @@ def analyze_text(text, classifier):
         return None
     
     try:
-        # Limitar el texto a 512 tokens aproximadamente (2000 caracteres)
-        text_sample = text[:2000]
-        result = classifier(text_sample)[0]
+        # Limitar el texto a 512 tokens (aproximadamente 400 caracteres para estar seguros)
+        # El modelo RoBERTa tiene un límite estricto de 512 tokens
+        text_sample = text[:400]
+        result = classifier(text_sample, truncation=True, max_length=512)[0]
         
         # El modelo devuelve 'LABEL_0' para humano y 'LABEL_1' para IA
         if result['label'] == 'LABEL_1':
@@ -128,7 +129,7 @@ if uploaded_file is not None:
         
         # Dividir en fragmentos
         with st.spinner("Analizando contenido..."):
-            chunks = split_text_into_chunks(text, chunk_size=800)
+            chunks = split_text_into_chunks(text, chunk_size=400)
             
             if len(chunks) == 0:
                 st.warning("El documento no contiene suficiente texto para analizar.")
